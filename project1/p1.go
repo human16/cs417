@@ -26,6 +26,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	// You will need more packages as you go. Add them here when you need
@@ -56,7 +57,7 @@ func RunSeq(cfg SeqConfig) []float64 {
 	for step := 0; step < cfg.Steps; step++ {
 		batch := b.Next(step)
 		g := Grad(w, batch)
-		for i := 0; i < len(w)-1; i++{
+		for i := 0; i < len(w); i++ {
 			w[i] -= cfg.LR * g[i] / float64(cfg.BatchSize)
 		}
 		if cfg.OnStep != nil {
@@ -82,12 +83,87 @@ type LocalConfig struct {
 	NRanks    int
 }
 
+func GradComp(rank int, cfg LocalConfig, from []chan []float64, to []chan []float64, finalW chan<- []float64, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	w := Init(cfg.Seed)
+	b := NewBatcher(cfg.Seed, cfg.BatchSize)
+	for step := 0; step < cfg.Steps; step++ {
+		batch := b.Next(step)
+		sliceSize := cfg.BatchSize / cfg.NRanks
+		minionBatch := batch[rank*sliceSize : (rank+1)*sliceSize]
+		g := Grad(w, minionBatch)
+
+		var totalGrad []float64
+
+		if rank == 0 {
+			totalGrad = make([]float64, len(w))
+
+			for i := range totalGrad {
+				totalGrad[i] += g[i]
+			}
+
+			for minion := 1; minion < cfg.NRanks; minion++ {
+				currG := <-to[minion]
+				for i := range totalGrad {
+					totalGrad[i] += currG[i]
+				}
+			}
+
+			for minion := 1; minion < cfg.NRanks; minion++ {
+				from[minion] <- totalGrad
+			}
+		} else {
+			to[rank] <- g
+
+			totalGrad = <-from[rank]
+		}
+
+		for i := 0; i < len(w); i++ {
+			w[i] -= cfg.LR * totalGrad[i] / float64(cfg.BatchSize)
+		}
+	}
+
+	if rank == 0 {
+		finalW <- w
+	}
+}
+
 // RunLocal trains using NRanks goroutines and returns the final weights.
 func RunLocal(cfg LocalConfig) []float64 {
 	// Write your code here.
 	// See project1-desc.pdf, Part 2. Sum partial gradients in rank order so
 	// two runs with the same input return the same result, bit for bit.
-	panic("not implemented yet: Part 2")
+	var wg sync.WaitGroup
+
+	toMinions := make([]chan []float64, cfg.NRanks)
+	FromMinons := make([]chan []float64, cfg.NRanks)
+
+	for i := 0; i < cfg.NRanks; i++ {
+		toMinions[i] = make(chan []float64)
+		FromMinons[i] = make(chan []float64)
+	}
+
+	finalW := make(chan []float64, 1)
+
+	for minion := 0; minion < cfg.NRanks; minion++ {
+		wg.Add(1)
+		go GradComp(minion, cfg, FromMinons, toMinions, finalW, &wg)
+	}
+
+	wg.Wait()
+	return <-finalW
+
+	// for step := 0; step < cfg.Steps-1; step++ {
+	// 	batch := b.Next(step)
+	// 	g := Grad(w, batch)
+	// 	for i := 0; i < len(w); i++ {
+	// 		w[i] -= cfg.LR * g[i] / float64(cfg.BatchSize)
+	// 	}
+	// }
+	// return w
+
+	// panic("not implemented yet: Part 2")
 }
 
 /* Part 3 -- Coordinator and workers over RPC (65 points). */
