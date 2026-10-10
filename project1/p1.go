@@ -232,11 +232,26 @@ type DistConfig struct {
 	OnStep    func(step int, w []float64)
 }
 
-type remoteWorker struct {
+type Minion struct {
 	addr    string
 	client  *rpc.Client
 	alive   bool
 	working bool
+}
+
+type attemptResult struct {
+	step, slice, worker int
+	grad                []float64
+	err                 error
+}
+
+func findMinion(pool []*Minion) (int, *Minion) {
+	for i, worker := range pool {
+		if worker.alive && !worker.working {
+			return i, worker
+		}
+	}
+	return -1, nil
 }
 
 // RunCoordinator drives training end to end and returns the final
@@ -250,17 +265,17 @@ func RunCoordinator(cfg DistConfig) []float64 {
 		panic("batch size not divisible by #slices")
 	}
 
-	pool := make([]*remoteWorker, len(cfg.Workers))
+	pool := make([]*Minion, len(cfg.Workers))
 
 	// initialize workers
 	for i := 0; i < len(cfg.Workers); i++ {
-		conn, err := net.DialTimeout("tcp", cfg.Workers[i], 500*time.Millisecond)
+		conn, err := net.DialTimeout("tcp", cfg.Workers[i], cfg.Timeout)
 		if err == nil {
-			pool[i] = &remoteWorker{cfg.Workers[i], rpc.NewClient(conn), true, false}
+			pool[i] = &Minion{cfg.Workers[i], rpc.NewClient(conn), true, false}
 		} else {
 			// if initialization failed, just put an empty worker with that
 			// address in the expected lcoation
-			pool[i] = &remoteWorker{addr: cfg.Workers[i]}
+			pool[i] = &Minion{addr: cfg.Workers[i]}
 		}
 	}
 
@@ -275,19 +290,65 @@ func RunCoordinator(cfg DistConfig) []float64 {
 	w := Init(cfg.Seed)
 	b := NewBatcher(cfg.Seed, cfg.BatchSize)
 	sliceSize := cfg.BatchSize / cfg.NSlices
+	results := make(chan attemptResult, cfg.NSlices*len(cfg.Workers))
 	for step := 0; step < cfg.Steps; step++ {
 		batch := b.Next(step)
-		for sliceIndex := 0; sliceIndex < cfg.NSlices; i++ {
-			slice := batch[sliceIndex*sliceSize : (sliceIndex+1)*sliceSize]
-			for _, worker := range pool {
-				if worker.alive && !worker.working {
+		sent := make([]bool, cfg.NSlices)
+		gradients := make([][]float64, cfg.NSlices)
+		slicesCompleted := 0
+
+		for slicesCompleted < cfg.NSlices {
+			for sliceIndex := 0; sliceIndex < cfg.NSlices; sliceIndex++ {
+				if sent[sliceIndex] {
+					continue
+				}
+
+				i, worker := findMinion(pool)
+				if i == -1 {
+					break
+				} else {
 					worker.working = true
-					var reply GradReply
-					go Worker.Grad(_, GradArgs{step, sliceIndex, w, batch}, &reply)
+					slice := batch[sliceIndex*sliceSize : (sliceIndex+1)*sliceSize]
+					args := GradArgs{step, sliceIndex, w, slice}
+
+					go func(workerIndex int, sliceIndex int, args GradArgs) {
+						var reply GradReply
+						err := pool[workerIndex].client.Call("Worker.Grad", args, &reply)
+						results <- attemptResult{step, sliceIndex, workerIndex, reply.Grad, err}
+					}(i, sliceIndex, args)
+
+					sent[sliceIndex] = true
 				}
 			}
+
+			r := <-results
+			pool[r.worker].working = false
+
+			if r.err == nil && gradients[r.slice] == nil {
+				gradients[r.slice] = r.grad
+				slicesCompleted++
+			}
+		}
+
+		summedGrads := make([]float64, len(w))
+		for slice := 0; slice < cfg.NSlices; slice++ {
+			for i := 0; i < len(w); i++ {
+				summedGrads[i] += gradients[slice][i]
+			}
+		}
+
+		for i := 0; i < len(w); i++ {
+			w[i] -= cfg.LR * summedGrads[i] / float64(cfg.BatchSize)
+		}
+
+		if cfg.OnStep != nil {
+			copyW := make([]float64, len(w))
+			copy(copyW, w)
+			cfg.OnStep(step, copyW)
 		}
 	}
+
+	return w
 	// var sliceSize int = cfg.BatchSize / cfg.NSlices
 	// for i := 0; i < cfg.NSlices; i++ {
 	// 	var curr *Batcher
