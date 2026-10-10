@@ -233,9 +233,9 @@ type DistConfig struct {
 }
 
 type remoteWorker struct {
-	addr string
-	client *rpc.Client
-	alive bool
+	addr    string
+	client  *rpc.Client
+	alive   bool
 	working bool
 }
 
@@ -250,7 +250,7 @@ func RunCoordinator(cfg DistConfig) []float64 {
 		panic("batch size not divisible by #slices")
 	}
 
-	pool := make ([]*remoteWorker, len(cfg.Workers))
+	pool := make([]*remoteWorker, len(cfg.Workers))
 
 	// initialize workers
 	for i := 0; i < len(cfg.Workers); i++ {
@@ -258,7 +258,7 @@ func RunCoordinator(cfg DistConfig) []float64 {
 		if err == nil {
 			pool[i] = &remoteWorker{cfg.Workers[i], rpc.NewClient(conn), true, false}
 		} else {
-			// if initialization failed, just put an empty worker with that 
+			// if initialization failed, just put an empty worker with that
 			// address in the expected lcoation
 			pool[i] = &remoteWorker{addr: cfg.Workers[i]}
 		}
@@ -267,10 +267,10 @@ func RunCoordinator(cfg DistConfig) []float64 {
 	defer func() {
 		for _, worker := range pool {
 			if worker.client != nil {
-				wc.cliend.Close()
+				worker.client.Close()
 			}
 		}
-	}
+	}()
 
 	w := Init(cfg.Seed)
 	b := NewBatcher(cfg.Seed, cfg.BatchSize)
@@ -278,7 +278,7 @@ func RunCoordinator(cfg DistConfig) []float64 {
 	for step := 0; step < cfg.Steps; step++ {
 		batch := b.Next(step)
 		for sliceIndex := 0; sliceIndex < cfg.NSlices; i++ {
-			slice := batch[sliceIndex*sliceSize:(sliceIndex+1)*sliceSize]
+			slice := batch[sliceIndex*sliceSize : (sliceIndex+1)*sliceSize]
 			for _, worker := range pool {
 				if worker.alive && !worker.working {
 					worker.working = true
