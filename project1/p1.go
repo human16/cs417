@@ -20,9 +20,12 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"log"
+	"net"
+	"net/rpc"
 	"os"
 	"os/signal"
 	"strings"
@@ -174,9 +177,14 @@ type Worker struct{}
 
 // Grad returns the summed gradient for one slice of a batch.
 func (Worker) Grad(args GradArgs, reply *GradReply) error {
+	if !(len(args.W) == D && len(args.Batch) > 0) {
+		return errors.New("erorr")
+	}
+	reply.Grad = Grad(args.W, args.Batch)
+	return nil
 	// Write your code here.
 	// See project1-desc.pdf, Part 3.1.
-	panic("not implemented yet: Part 3.1 (Worker.Grad)")
+	// panic("not implemented yet: Part 3.1 (Worker.Grad)")
 }
 
 // Ping is a health check. Leave it as it is.
@@ -190,7 +198,25 @@ func (Worker) Ping(_ PingArgs, reply *PingReply) error {
 func RunWorker(addr string) (actualAddr string, stop func(), err error) {
 	// Write your code here.
 	// See project1-desc.pdf, Part 3.1.
-	panic("not implemented yet: Part 3.1 (RunWorker)")
+	// panic("not implemented yet: Part 3.1 (RunWorker)")
+
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return "", nil, err
+	}
+	server := rpc.NewServer()
+	server.Register(new(Worker))
+	go server.Accept(listener)
+
+	actualAddr = listener.Addr().String()
+	var once sync.Once
+	stop = func() {
+		once.Do(func() {
+			listener.Close()
+		})
+	}
+
+	return actualAddr, stop, nil
 }
 
 // DistConfig holds the inputs to RunCoordinator. Do not add or remove
@@ -206,13 +232,71 @@ type DistConfig struct {
 	OnStep    func(step int, w []float64)
 }
 
+type remoteWorker struct {
+	addr string
+	client *rpc.Client
+	alive bool
+	working bool
+}
+
 // RunCoordinator drives training end to end and returns the final
 // weights.
 func RunCoordinator(cfg DistConfig) []float64 {
 	// Write your code here.
 	// See project1-desc.pdf, Part 3.2 and Part 3.3.
 	// You are free to add helper types and helper functions.
-	panic("not implemented yet: Part 3 (RunCoordinator)")
+	// panic("not implemented yet: Part 3 (RunCoordinator)")
+	if cfg.BatchSize%cfg.NSlices != 0 {
+		panic("batch size not divisible by #slices")
+	}
+
+	pool := make ([]*remoteWorker, len(cfg.Workers))
+
+	// initialize workers
+	for i := 0; i < len(cfg.Workers); i++ {
+		conn, err := net.DialTimeout("tcp", cfg.Workers[i], 500*time.Millisecond)
+		if err == nil {
+			pool[i] = &remoteWorker{cfg.Workers[i], rpc.NewClient(conn), true, false}
+		} else {
+			// if initialization failed, just put an empty worker with that 
+			// address in the expected lcoation
+			pool[i] = &remoteWorker{addr: cfg.Workers[i]}
+		}
+	}
+
+	defer func() {
+		for _, worker := range pool {
+			if worker.client != nil {
+				wc.cliend.Close()
+			}
+		}
+	}
+
+	w := Init(cfg.Seed)
+	b := NewBatcher(cfg.Seed, cfg.BatchSize)
+	sliceSize := cfg.BatchSize / cfg.NSlices
+	for step := 0; step < cfg.Steps; step++ {
+		batch := b.Next(step)
+		for sliceIndex := 0; sliceIndex < cfg.NSlices; i++ {
+			slice := batch[sliceIndex*sliceSize:(sliceIndex+1)*sliceSize]
+			for _, worker := range pool {
+				if worker.alive && !worker.working {
+					worker.working = true
+					var reply GradReply
+					go Worker.Grad(_, GradArgs{step, sliceIndex, w, batch}, &reply)
+				}
+			}
+		}
+	}
+	// var sliceSize int = cfg.BatchSize / cfg.NSlices
+	// for i := 0; i < cfg.NSlices; i++ {
+	// 	var curr *Batcher
+	// 	curr.batchSize = sliceSize
+	// 	curr.perm = b.perm
+	// 	curr.pool = b.pool[i*sliceSize:(i+1)*sliceSize]
+	// 	batches = append(batches, curr)
+	// }
+
 }
 
 /* main -- one binary, four modes. Leave this as it is. */
