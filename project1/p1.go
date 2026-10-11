@@ -245,9 +245,20 @@ type attemptResult struct {
 	err                 error
 }
 
-func findMinion(pool []*Minion) (int, *Minion) {
+type sliceState struct {
+	done      bool
+	onIt      int
+	tried     map[int]bool
+	timesdOut bool
+}
+
+type timeOut struct {
+	step, sliceIndex, minion int
+}
+
+func findMinion(pool []*Minion, tried map[int]bool) (int, *Minion) {
 	for i, worker := range pool {
-		if worker.alive && !worker.working {
+		if worker.alive && !worker.working && !tried[i] {
 			return i, worker
 		}
 	}
@@ -275,7 +286,7 @@ func RunCoordinator(cfg DistConfig) []float64 {
 		} else {
 			// if initialization failed, just put an empty worker with that
 			// address in the expected lcoation
-			pool[i] = &Minion{addr: cfg.Workers[i]}
+			pool[i] = &Minion{addr: cfg.Workers[i], alive: false}
 		}
 	}
 
@@ -290,44 +301,88 @@ func RunCoordinator(cfg DistConfig) []float64 {
 	w := Init(cfg.Seed)
 	b := NewBatcher(cfg.Seed, cfg.BatchSize)
 	sliceSize := cfg.BatchSize / cfg.NSlices
+
 	results := make(chan attemptResult, cfg.NSlices*len(cfg.Workers))
+	timeout := make(chan timeOut, cfg.NSlices*len(cfg.Workers))
+
 	for step := 0; step < cfg.Steps; step++ {
 		batch := b.Next(step)
-		sent := make([]bool, cfg.NSlices)
+		// sent := make([]bool, cfg.NSlices)
 		gradients := make([][]float64, cfg.NSlices)
 		slicesCompleted := 0
 
+		sliceStates := make([]sliceState, cfg.NSlices)
+		for slice := 0; slice < cfg.NSlices; slice++ {
+			sliceStates[slice] = sliceState{
+				tried: make(map[int]bool),
+			}
+		}
+
 		for slicesCompleted < cfg.NSlices {
 			for sliceIndex := 0; sliceIndex < cfg.NSlices; sliceIndex++ {
-				if sent[sliceIndex] {
+				if sliceStates[sliceIndex].done {
+					continue
+				}
+				if sliceStates[sliceIndex].onIt == 0 || sliceStates[sliceIndex].timesdOut {
+					i, worker := findMinion(pool, sliceStates[sliceIndex].tried)
+					if i == -1 {
+						continue
+					} else {
+						worker.working = true
+						sliceStates[sliceIndex].tried[i] = true
+						sliceStates[sliceIndex].onIt++
+						sliceStates[sliceIndex].timesdOut = false
+
+						slice := batch[sliceIndex*sliceSize : (sliceIndex+1)*sliceSize]
+						args := GradArgs{step, sliceIndex, w, slice}
+
+						currWorker := i
+						currSlice := sliceIndex
+						go func(workerIndex int, sliceIndex int, args GradArgs) {
+							var reply GradReply
+							err := pool[workerIndex].client.Call("Worker.Grad", args, &reply)
+							results <- attemptResult{step, sliceIndex, workerIndex, reply.Grad, err}
+						}(currWorker, currSlice, args)
+
+						time.AfterFunc(cfg.Timeout, func() {
+							timeout <- timeOut{step, currSlice, currWorker}
+						})
+					}
+				}
+			}
+
+			select {
+			case r := <-results:
+				pool[r.worker].working = false
+
+				if r.step != step {
 					continue
 				}
 
-				i, worker := findMinion(pool)
-				if i == -1 {
-					break
+				sliceStates[r.slice].onIt--
+
+				if r.err == nil {
+					if !sliceStates[r.slice].done {
+						sliceStates[r.slice].done = true
+						gradients[r.slice] = r.grad
+						slicesCompleted++
+					}
 				} else {
-					worker.working = true
-					slice := batch[sliceIndex*sliceSize : (sliceIndex+1)*sliceSize]
-					args := GradArgs{step, sliceIndex, w, slice}
-
-					go func(workerIndex int, sliceIndex int, args GradArgs) {
-						var reply GradReply
-						err := pool[workerIndex].client.Call("Worker.Grad", args, &reply)
-						results <- attemptResult{step, sliceIndex, workerIndex, reply.Grad, err}
-					}(i, sliceIndex, args)
-
-					sent[sliceIndex] = true
+					pool[r.worker].alive = false
+					if pool[r.worker].client != nil {
+						pool[r.worker].client.Close()
+						pool[r.worker].client = nil
+					}
 				}
+			case oopsie := <-timeout:
+				if oopsie.step != step || sliceStates[oopsie.sliceIndex].done {
+					continue
+				}
+				sliceStates[oopsie.sliceIndex].timesdOut = true
+				// ToDo: put logic for time diverting here
 			}
+			// r := <-results
 
-			r := <-results
-			pool[r.worker].working = false
-
-			if r.err == nil && gradients[r.slice] == nil {
-				gradients[r.slice] = r.grad
-				slicesCompleted++
-			}
 		}
 
 		summedGrads := make([]float64, len(w))
