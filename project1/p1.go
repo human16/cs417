@@ -94,8 +94,8 @@ func GradComp(rank int, cfg LocalConfig, from []chan []float64, to []chan []floa
 	for step := 0; step < cfg.Steps; step++ {
 		batch := b.Next(step)
 		sliceSize := cfg.BatchSize / cfg.NRanks
-		minionBatch := batch[rank*sliceSize : (rank+1)*sliceSize]
-		g := Grad(w, minionBatch)
+		sliceBatch := batch[rank*sliceSize : (rank+1)*sliceSize]
+		g := Grad(w, sliceBatch)
 
 		var totalGrad []float64
 
@@ -379,7 +379,6 @@ func RunCoordinator(cfg DistConfig) []float64 {
 					continue
 				}
 				sliceStates[oopsie.sliceIndex].timesdOut = true
-				// ToDo: put logic for time diverting here
 			}
 			// r := <-results
 

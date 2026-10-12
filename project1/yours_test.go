@@ -12,7 +12,11 @@
 // caught it. Then you never chase the same bug twice.
 package main
 
-import "testing"
+import (
+	"net"
+	"testing"
+	"time"
+)
 
 // A smoke test. When RunSeq is implemented, this passes: the returned
 // slice has the right length. It does not check that the model
@@ -75,14 +79,81 @@ func TestExampleLocal(t *testing.T) {
 
 // Template for Part 3. Uncomment when RunWorker works. Starts one
 // worker and shuts it down.
-//
-// func TestExampleWorker(t *testing.T) {
-// 	addr, stop, err := RunWorker("localhost:0")
-// 	if err != nil {
-// 		t.Fatalf("RunWorker: %v", err)
-// 	}
-// 	defer stop()
-// 	if addr == "" {
-// 		t.Fatal("RunWorker returned an empty address")
-// 	}
-// }
+func TestExampleWorker(t *testing.T) {
+	addr, stop, err := RunWorker("localhost:0")
+	if err != nil {
+		t.Fatalf("RunWorker: %v", err)
+	}
+	defer stop()
+	if addr == "" {
+		t.Fatal("RunWorker returned an empty address")
+	}
+}
+
+// helper function
+func initWorkers(t *testing.T, n int) []string {
+	var addrs []string
+	for i := 0; i < n; i++ {
+		addr, stop, err := RunWorker("localhost:0")
+		if err != nil {
+			t.Fatalf("Runworker failed with %v", err)
+		}
+		t.Cleanup(stop)
+		addrs = append(addrs, addr)
+	}
+	return addrs
+}
+
+func TestOkay(t *testing.T) {
+	addrs := initWorkers(t, 3)
+	cfg := DistConfig{Seed: 2026, Steps: 100, BatchSize: 64, LR: 0.02, NSlices: 8, Workers: addrs, Timeout: time.Second}
+	w := RunCoordinator(cfg)
+
+	eval := NewBatcher(2026, 1024).Next(0)
+	before := Loss(Init(2026), eval)
+	after := Loss(w, eval)
+	if after*20 > before {
+		t.Fatalf("loss is not a 20x decrease. before: %g, after: %g", before, after)
+	}
+}
+
+func TestMbapeSpecial(t *testing.T) {
+	addrs := initWorkers(t, 3)
+	cfg := DistConfig{Seed: 2026, Steps: 0, BatchSize: 64, LR: 0.02, NSlices: 8, Workers: addrs, Timeout: time.Second}
+	w := RunCoordinator(cfg)
+	want := Init(2026)
+	for i := range want {
+		if w[i] != want[i] {
+			t.Fatalf("w[%d] = %v, want %v", i, w[i], want[i])
+		}
+	}
+}
+
+func TestDeactivatedWorker(t *testing.T) {
+	listener, err := net.Listen("tcp", "localhost:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadAddr := listener.Addr().String()
+	listener.Close()
+
+	addrs := initWorkers(t, 3)
+
+	cfg := DistConfig{Seed: 2026, Steps: 0, BatchSize: 64, LR: 0.02, NSlices: 8, Workers: addrs, Timeout: time.Second}
+
+	working := RunCoordinator(cfg)
+
+	cfg.Workers = append(cfg.Workers, deadAddr)
+
+	dead := RunCoordinator(cfg)
+
+	if len(dead) != len(working) {
+		t.Fatalf("different length output")
+	}
+
+	for i := range working {
+		if working[i] != dead[i] {
+			t.Fatalf("working[%d] = %v, dead = %v", i, working[i], dead[i])
+		}
+	}
+}
