@@ -38,6 +38,8 @@ type KVServer struct {
 	   ADD YOUR CODE HERE: your key-value store, your dedup table,
 	   and any helper state you need.
 	*/
+
+	maps map[string]int // takes in the string for the specific weight and maps to its value
 }
 
 /*
@@ -57,7 +59,12 @@ func MakeKVServer(me, backup string) *KVServer {
 	     return kv
 	*/
 	_, _ = me, backup
-	panic("not implemented yet")
+
+	kv := &KVServer{me: me, backup: backup}
+	kv.dead = 0 // not
+	kv.maps = map[string]int{}
+
+	return kv
 }
 
 /*
