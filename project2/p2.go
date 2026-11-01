@@ -147,7 +147,11 @@ type Clerk struct {
 	/*
 	   ADD YOUR CODE HERE: cached RPC client, etc.
 	*/
+
+	client *rpc.Client // cached connection RPC client
 }
+
+var clerkCount uint64 // count of how many clerks
 
 /*
 EXPORTED
@@ -157,6 +161,8 @@ primary address.
 func MakeClerk(primary string) *Clerk {
 	ck := &Clerk{primary: primary}
 	/* ADD YOUR CODE HERE */
+	n := atomic.AddUint64(&clerkCount, 1)
+	ck.xid = n << 32 // clerk XID is initialized by the clerk number for the first 32 bits
 	return ck
 }
 
@@ -170,13 +176,49 @@ func (ck *Clerk) nextXid() Xid {
 }
 
 /*
+call is a helper function for the Clerk clients.
+*/
+func (ck *Clerk) call(method string, args interface{}, reply interface{}) bool {
+	ck.mu.Lock()
+	defer ck.mu.Unlock()
+	if ck.client == nil {
+		c, err := rpc.Dial("tcp", ck.primary)
+		if err != nil {
+			return false
+		}
+		ck.client = c
+	}
+
+	err := ck.client.Call(method, args, reply)
+	if err != nil {
+		ck.client.Close()
+		ck.client = nil
+		return false
+	}
+
+	return true
+}
+
+/*
 EXPORTED
 Get returns the current value for key, or "" if the key is missing.
 Keeps retrying through RPC timeouts until it gets a reply.
 */
 func (ck *Clerk) Get(key string) string {
 	/* ADD YOUR CODE HERE */
-	panic("not implemented yet")
+	// panic("not implemented yet")
+
+	xid := ck.nextXid()
+	args := GetArgs{Key: key, Xid: xid}
+	for {
+		var reply GetReply
+		ok := ck.call("KVServer.Get", args, &reply)
+		if ok {
+			if reply.Err == OK || reply.Err == ErrNoKey {
+				return reply.Value
+			}
+		}
+	}
 }
 
 /*
