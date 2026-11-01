@@ -39,7 +39,8 @@ type KVServer struct {
 	   and any helper state you need.
 	*/
 
-	maps map[string]int // takes in the string for the specific weight and maps to its value
+	dedup map[Xid]string    // xid - value. To make sure no double results occur
+	maps  map[string]string // 	key - value. Takes in the string for the specific weight and maps to its value
 }
 
 /*
@@ -62,7 +63,10 @@ func MakeKVServer(me, backup string) *KVServer {
 
 	kv := &KVServer{me: me, backup: backup}
 	kv.dead = 0 // not
-	kv.maps = map[string]int{}
+	kv.dedup = map[Xid]string{}
+	kv.maps = map[string]string{}
+	kv.mu = sync.Mutex{}
+	kv.mu.Unlock()
 
 	return kv
 }
@@ -75,7 +79,28 @@ same reply as the first call.
 */
 func (kv *KVServer) Get(args GetArgs, reply *GetReply) error {
 	/* ADD YOUR CODE HERE */
-	panic("not implemented yet")
+	// panic("not implemented yet")
+	kv.mu.Lock()
+	value, ok := kv.dedup[args.Xid]
+	if ok {
+		reply.Value = value
+		reply.Err = "OK"
+		kv.mu.Unlock()
+		return nil
+	} else {
+		value, ok = kv.maps[args.Key]
+		if ok {
+			kv.dedup[args.Xid] = kv.maps[args.Key]
+			reply.Value = kv.maps[args.Key]
+			kv.mu.Unlock()
+			return nil
+		} else {
+			reply.Err = "No Value Found"
+			kv.mu.Unlock()
+			return nil
+		}
+	}
+
 }
 
 /*
