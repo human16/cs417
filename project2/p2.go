@@ -13,6 +13,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"net"
 	"net/rpc"
 	"os"
 	"sync"
@@ -227,7 +228,20 @@ Put overwrites the value for key.  Keeps retrying (see Get).
 */
 func (ck *Clerk) Put(key, value string) {
 	/* ADD YOUR CODE HERE */
-	panic("not implemented yet")
+	// panic("not implemented yet")
+
+	xid := ck.nextXid()
+	args := PutAppendArgs{Key: key, Value: value, Op: OpPut, Xid: xid}
+
+	for {
+		var reply PutAppendReply
+		ok := ck.call("KVServer.Put", args, &reply)
+		if ok {
+			if reply.Err == OK {
+				return
+			}
+		}
+	}
 }
 
 /* ========================================================================
@@ -296,5 +310,12 @@ func serveForever(addr string) {
 	/*
 	   ADD YOUR CODE HERE: net.Listen on tcp addr, loop over rpc.Accept.
 	*/
-	panic("not implemented yet")
+	// panic("not implemented yet")
+
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		die("listen failed: " + err.Error())
+	}
+
+	rpc.Accept(listener)
 }
