@@ -67,7 +67,6 @@ func MakeKVServer(me, backup string) *KVServer {
 	kv.dedup = map[Xid]string{}
 	kv.maps = map[string]string{}
 	kv.mu = sync.Mutex{}
-	kv.mu.Unlock()
 
 	return kv
 }
@@ -96,6 +95,7 @@ func (kv *KVServer) Get(args GetArgs, reply *GetReply) error {
 			kv.mu.Unlock()
 			return nil
 		} else {
+			kv.dedup[args.Xid] = ""
 			reply.Err = "No Value Found"
 			kv.mu.Unlock()
 			return nil
@@ -113,7 +113,40 @@ ack before replying.
 */
 func (kv *KVServer) Put(args PutAppendArgs, reply *PutAppendReply) error {
 	/* ADD YOUR CODE HERE */
-	panic("not implemented yet")
+	// panic("not implemented yet")
+	kv.mu.Lock()
+	_, ok := kv.dedup[args.Xid]
+	if ok {
+		reply.Err = "OK"
+		kv.mu.Unlock()
+		return nil
+	}
+
+	kv.maps[args.Key] = args.Value
+	if kv.backup != "" {
+		conn, err := rpc.Dial("tcp", kv.backup)
+		if err != nil {
+			reply.Err = "TCP Dial Failed"
+			kv.mu.Unlock()
+			return nil
+		}
+		backupArgs := ForwardArgs{Key: args.Key, Value: args.Value, Op: args.Op, Xid: args.Xid}
+		backupReply := ForwardReply{Err: ""}
+		if conn.Call("KVServer.ForwardOp", &backupArgs, &backupReply) != nil {
+			reply.Err = "Backup Failed"
+			kv.mu.Unlock()
+			return nil
+		}
+		if backupReply.Err != "OK" {
+			reply.Err = backupReply.Err
+			kv.mu.Unlock()
+			return nil
+		}
+
+	}
+	kv.mu.Unlock()
+
+	return nil
 }
 
 /* ========================================================================
