@@ -125,6 +125,7 @@ func (kv *KVServer) Put(args PutAppendArgs, reply *PutAppendReply) error {
 	}
 
 	kv.maps[args.Key] = args.Value
+	kv.dedup[args.Xid] = ""
 	if kv.backup != "" {
 		conn, err := rpc.Dial("tcp", kv.backup)
 		if err != nil {
@@ -176,6 +177,7 @@ func (kv *KVServer) ForwardOp(args ForwardArgs, reply *ForwardReply) error {
 	}
 
 	kv.maps[args.Key] = args.Value
+	kv.dedup[args.Xid] = ""
 
 	return nil
 }
