@@ -95,7 +95,7 @@ func (kv *KVServer) Get(args GetArgs, reply *GetReply) error {
 			return nil
 		} else {
 			kv.dedup[args.Xid] = ""
-			reply.Err = "No Value Found"
+			reply.Err = ErrNoKey
 			return nil
 		}
 	}
@@ -159,7 +159,25 @@ at-most-once) and returns OK.
 */
 func (kv *KVServer) ForwardOp(args ForwardArgs, reply *ForwardReply) error {
 	/* ADD YOUR CODE HERE */
-	panic("not implemented yet")
+	// panic("not implemented yet")
+
+	if args.Key == "" {
+		reply.Err = ErrNoKey
+		return nil
+	}
+
+	kv.mu.Unlock()
+	defer kv.mu.Lock()
+
+	_, ok := kv.dedup[args.Xid]
+	if ok {
+		reply.Err = OK
+		return nil
+	}
+
+	kv.maps[args.Key] = args.Value
+
+	return nil
 }
 
 /* ========================================================================
