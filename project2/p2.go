@@ -131,7 +131,6 @@ func (kv *KVServer) Put(args PutAppendArgs, reply *PutAppendReply) error {
 		backupReply := ForwardReply{Err: ""}
 		if conn.Call("KVServer.ForwardOp", &backupArgs, &backupReply) != nil {
 			reply.Err = "Backup Failed"
-			kv.mu.Unlock()
 			return nil
 		}
 		if backupReply.Err != "OK" {
