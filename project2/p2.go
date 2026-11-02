@@ -195,6 +195,7 @@ func MakeClerk(primary string) *Clerk {
 	/* ADD YOUR CODE HERE */
 	n := atomic.AddUint64(&clerkCount, 1)
 	ck.xid = n << 32 // clerk XID is initialized by the clerk number for the first 32 bits
+	ck.mu = sync.Mutex{}
 	return ck
 }
 
