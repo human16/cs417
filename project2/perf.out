@@ -1,0 +1,9 @@
+=== RUN   TestPerf
+
+PERF  sgd_steps_per_sec=19605
+      initial_loss=9.9401  final_loss=0.0001
+2026/11/02 18:14:46 rpc.Serve: accept:accept tcp 127.0.0.1:19001: use of closed network connection
+2026/11/02 18:14:46 rpc.Serve: accept:accept tcp 127.0.0.1:19002: use of closed network connection
+--- PASS: TestPerf (0.74s)
+PASS
+ok    cs417/p2    0.748s

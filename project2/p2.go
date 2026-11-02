@@ -42,6 +42,8 @@ type KVServer struct {
 
 	dedup map[Xid]string    // xid - value. To make sure no double results occur
 	maps  map[string]string // 	key - value. Takes in the string for the specific weight and maps to its value
+
+	backupClient *rpc.Client
 }
 
 /*
@@ -67,6 +69,7 @@ func MakeKVServer(me, backup string) *KVServer {
 	kv.dedup = map[Xid]string{}
 	kv.maps = map[string]string{}
 	kv.mu = sync.Mutex{}
+	kv.backupClient = nil
 
 	return kv
 }
@@ -136,15 +139,18 @@ func (kv *KVServer) Put(args PutAppendArgs, reply *PutAppendReply) error {
 	}
 
 	if kv.backup != "" {
-		conn, err := rpc.Dial("tcp", kv.backup)
-		if err != nil {
-			reply.Err = ErrNetwork
-			return nil
+		if kv.backupClient == nil {
+			conn, err := rpc.Dial("tcp", kv.backup)
+			if err != nil {
+				reply.Err = ErrNetwork
+				return nil
+			}
+			kv.backupClient = conn
 		}
-		defer conn.Close()
+
 		backupArgs := ForwardArgs{Key: args.Key, Value: args.Value, Op: args.Op, Xid: args.Xid}
 		backupReply := ForwardReply{Err: ""}
-		if conn.Call("KVServer.ForwardOp", &backupArgs, &backupReply) != nil {
+		if kv.backupClient.Call("KVServer.ForwardOp", &backupArgs, &backupReply) != nil {
 			reply.Err = "Backup Failed"
 			return nil
 		}
