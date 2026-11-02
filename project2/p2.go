@@ -81,23 +81,21 @@ func (kv *KVServer) Get(args GetArgs, reply *GetReply) error {
 	/* ADD YOUR CODE HERE */
 	// panic("not implemented yet")
 	kv.mu.Lock()
+	defer kv.mu.Unlock()
 	value, ok := kv.dedup[args.Xid]
 	if ok {
 		reply.Value = value
 		reply.Err = "OK"
-		kv.mu.Unlock()
 		return nil
 	} else {
 		value, ok = kv.maps[args.Key]
 		if ok {
 			kv.dedup[args.Xid] = kv.maps[args.Key]
 			reply.Value = kv.maps[args.Key]
-			kv.mu.Unlock()
 			return nil
 		} else {
 			kv.dedup[args.Xid] = ""
 			reply.Err = "No Value Found"
-			kv.mu.Unlock()
 			return nil
 		}
 	}
@@ -115,10 +113,10 @@ func (kv *KVServer) Put(args PutAppendArgs, reply *PutAppendReply) error {
 	/* ADD YOUR CODE HERE */
 	// panic("not implemented yet")
 	kv.mu.Lock()
+	defer kv.mu.Unlock()
 	_, ok := kv.dedup[args.Xid]
 	if ok {
 		reply.Err = "OK"
-		kv.mu.Unlock()
 		return nil
 	}
 
@@ -127,7 +125,6 @@ func (kv *KVServer) Put(args PutAppendArgs, reply *PutAppendReply) error {
 		conn, err := rpc.Dial("tcp", kv.backup)
 		if err != nil {
 			reply.Err = "TCP Dial Failed"
-			kv.mu.Unlock()
 			return nil
 		}
 		backupArgs := ForwardArgs{Key: args.Key, Value: args.Value, Op: args.Op, Xid: args.Xid}
@@ -139,12 +136,10 @@ func (kv *KVServer) Put(args PutAppendArgs, reply *PutAppendReply) error {
 		}
 		if backupReply.Err != "OK" {
 			reply.Err = backupReply.Err
-			kv.mu.Unlock()
 			return nil
 		}
 
 	}
-	kv.mu.Unlock()
 
 	return nil
 }
