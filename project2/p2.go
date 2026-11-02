@@ -80,26 +80,31 @@ same reply as the first call.
 func (kv *KVServer) Get(args GetArgs, reply *GetReply) error {
 	/* ADD YOUR CODE HERE */
 	// panic("not implemented yet")
+	if kv.isDead() {
+		reply.Err = ErrNetwork
+		return nil
+	}
+
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 	value, ok := kv.dedup[args.Xid]
 	if ok {
 		reply.Value = value
-		reply.Err = "OK"
+		reply.Err = OK
 		return nil
 	} else {
 		value, ok = kv.maps[args.Key]
 		if ok {
 			kv.dedup[args.Xid] = kv.maps[args.Key]
 			reply.Value = kv.maps[args.Key]
+			reply.Err = OK
 			return nil
 		} else {
-			kv.dedup[args.Xid] = ""
+			// kv.dedup[args.Xid] = ""
 			reply.Err = ErrNoKey
 			return nil
 		}
 	}
-
 }
 
 /*
@@ -116,6 +121,12 @@ func (kv *KVServer) Put(args PutAppendArgs, reply *PutAppendReply) error {
 		reply.Err = ErrNoKey
 		return nil
 	}
+
+	if kv.isDead() {
+		reply.Err = ErrNetwork
+		return nil
+	}
+
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 	_, ok := kv.dedup[args.Xid]
@@ -124,8 +135,6 @@ func (kv *KVServer) Put(args PutAppendArgs, reply *PutAppendReply) error {
 		return nil
 	}
 
-	kv.maps[args.Key] = args.Value
-	kv.dedup[args.Xid] = ""
 	if kv.backup != "" {
 		conn, err := rpc.Dial("tcp", kv.backup)
 		if err != nil {
@@ -138,12 +147,17 @@ func (kv *KVServer) Put(args PutAppendArgs, reply *PutAppendReply) error {
 			reply.Err = "Backup Failed"
 			return nil
 		}
+		defer conn.Close()
 		if backupReply.Err != "OK" {
 			reply.Err = backupReply.Err
 			return nil
 		}
-
 	}
+
+	kv.maps[args.Key] = args.Value
+	kv.dedup[args.Xid] = ""
+
+	reply.Err = OK
 
 	return nil
 }
@@ -167,8 +181,13 @@ func (kv *KVServer) ForwardOp(args ForwardArgs, reply *ForwardReply) error {
 		return nil
 	}
 
-	kv.mu.Unlock()
-	defer kv.mu.Lock()
+	if kv.isDead() {
+		reply.Err = ErrNetwork
+		return nil
+	}
+
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
 
 	_, ok := kv.dedup[args.Xid]
 	if ok {
@@ -178,6 +197,8 @@ func (kv *KVServer) ForwardOp(args ForwardArgs, reply *ForwardReply) error {
 
 	kv.maps[args.Key] = args.Value
 	kv.dedup[args.Xid] = ""
+
+	reply.Err = OK
 
 	return nil
 }
@@ -289,7 +310,7 @@ func (ck *Clerk) Put(key, value string) {
 		var reply PutAppendReply
 		ok := ck.call("KVServer.Put", args, &reply)
 		if ok {
-			if reply.Err == OK {
+			if reply.Err == OK || reply.Err == ErrNoKey {
 				return
 			}
 		}
