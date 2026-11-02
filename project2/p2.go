@@ -112,11 +112,15 @@ ack before replying.
 func (kv *KVServer) Put(args PutAppendArgs, reply *PutAppendReply) error {
 	/* ADD YOUR CODE HERE */
 	// panic("not implemented yet")
+	if args.Key == "" {
+		reply.Err = ErrNoKey
+		return nil
+	}
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 	_, ok := kv.dedup[args.Xid]
 	if ok {
-		reply.Err = "OK"
+		reply.Err = OK
 		return nil
 	}
 
@@ -124,7 +128,7 @@ func (kv *KVServer) Put(args PutAppendArgs, reply *PutAppendReply) error {
 	if kv.backup != "" {
 		conn, err := rpc.Dial("tcp", kv.backup)
 		if err != nil {
-			reply.Err = "TCP Dial Failed"
+			reply.Err = ErrNetwork
 			return nil
 		}
 		backupArgs := ForwardArgs{Key: args.Key, Value: args.Value, Op: args.Op, Xid: args.Xid}
