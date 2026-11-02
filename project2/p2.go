@@ -141,13 +141,13 @@ func (kv *KVServer) Put(args PutAppendArgs, reply *PutAppendReply) error {
 			reply.Err = ErrNetwork
 			return nil
 		}
+		defer conn.Close()
 		backupArgs := ForwardArgs{Key: args.Key, Value: args.Value, Op: args.Op, Xid: args.Xid}
 		backupReply := ForwardReply{Err: ""}
 		if conn.Call("KVServer.ForwardOp", &backupArgs, &backupReply) != nil {
 			reply.Err = "Backup Failed"
 			return nil
 		}
-		defer conn.Close()
 		if backupReply.Err != "OK" {
 			reply.Err = backupReply.Err
 			return nil
