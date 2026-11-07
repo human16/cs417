@@ -1,4 +1,4 @@
-Ben Yavin (idk ur netID lol u can put it) and Brandon Huang (bh626)
+Ben Yavin (by240) and Brandon Huang (bh626)
 
 sgd_steps_per_sec=19605 (Insert details here about the perf.out test)
 
