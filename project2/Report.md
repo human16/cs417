@@ -5,7 +5,7 @@ sgd_steps_per_sec=19605
 ^
 this number was obtained by running the test for 50 times and picking out the best result. ran on grep.cs.rutgers.edu
 
-AI Usage: I used Claude for syntax in Part 1 and tests. Below are the following prompts I used
+AI Usage: I (Brandon) used Claude for syntax in Part 1 and tests. Below are the following prompts I used
 
 "Will there be overlap with the Xids if I use getpid and clerkCount?" 
 (I was asking for the best way to set xids. I ended up just using clerkCount with bit shifting <<32 instad of os.getpid())
