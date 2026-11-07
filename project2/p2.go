@@ -396,5 +396,5 @@ func serveForever(addr string) {
 		die("listen failed: " + err.Error())
 	}
 
-	go rpc.Accept(listener)
+	rpc.Accept(listener)
 }
